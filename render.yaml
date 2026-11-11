@@ -1,0 +1,16 @@
+# Render Blueprint.
+# In Render: New + -> Blueprint -> connect this repo. Render reads this file,
+# builds the Dockerfile, and prompts you for the three secret values below.
+services:
+  - type: web
+    name: ping-me
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PING_SECRET
+        sync: false
