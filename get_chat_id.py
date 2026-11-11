@@ -9,6 +9,7 @@ Copy the number into TELEGRAM_CHAT_ID in your .env file.
 """
 
 import os
+import re
 import sys
 
 import requests
@@ -24,13 +25,27 @@ token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 if not token:
     token = input("Paste your bot token: ").strip()
 
+token = "".join(token.split())
+if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token):
+    sys.exit(
+        "Invalid bot token. Copy the complete token from @BotFather, including "
+        "the numeric ID and colon (format: 123456789:YOUR_TOKEN)."
+    )
+
 url = f"https://api.telegram.org/bot{token}/getUpdates"
 try:
     data = requests.get(url, timeout=10).json()
-except Exception as exc:  # noqa: BLE001 - small helper script
-    sys.exit(f"Request failed: {exc}")
+except requests.RequestException:
+    sys.exit("Could not reach Telegram. Check your internet connection and try again.")
+except ValueError:
+    sys.exit("Telegram returned an invalid response. Try again shortly.")
 
 if not data.get("ok"):
+    if data.get("error_code") in (401, 404):
+        sys.exit(
+            "Telegram rejected the bot token. Copy the complete, current token "
+            "from @BotFather into TELEGRAM_BOT_TOKEN in .env, then try again."
+        )
     sys.exit(f"Telegram error: {data}")
 
 updates = data.get("result", [])

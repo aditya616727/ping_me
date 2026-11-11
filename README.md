@@ -22,7 +22,9 @@ worldwide.
 
 1. Tap the `t.me/<your_bot>` link BotFather gave you and send the bot any
    message (e.g. `hi`). *(The bot can only message you after you message it first.)*
-2. Copy `.env.example` to `.env` and paste your token into `TELEGRAM_BOT_TOKEN`.
+2. Copy `.env.example` to `.env` and paste your **complete** token into
+   `TELEGRAM_BOT_TOKEN`, including the numeric ID and colon, with no spaces.
+   Put real credentials in `.env`; keep `.env.example` as a template.
 3. Run the helper — it prints your chat ID:
 
    ```bash

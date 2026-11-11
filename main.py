@@ -23,7 +23,7 @@ try:
 except ImportError:
     pass
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+BOT_TOKEN = "".join(os.getenv("TELEGRAM_BOT_TOKEN", "").split())
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 PING_SECRET = os.getenv("PING_SECRET", "").strip()  # optional
 
@@ -49,8 +49,11 @@ def send_telegram(text: str) -> None:
             json={"chat_id": CHAT_ID, "text": text, "disable_web_page_preview": True},
             timeout=10,
         )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Could not reach Telegram: {exc}")
+    except requests.RequestException:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach Telegram. Check your internet connection and try again.",
+        ) from None
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"Telegram API error: {resp.text}")
 
