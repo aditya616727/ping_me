@@ -98,7 +98,7 @@ Create a repo on GitHub and push to it, then connect it on one of these:
 
 ### Vercel (serverless - great fit)
 
-Files: `vercel.json` + `api/index.py`. Scales to zero with only short cold starts
+File: `vercel.json` (it serves `main.py` directly). Scales to zero with only short cold starts
 (no 30-60s wake-up like free Render). Deploy from GitHub, or straight from this
 folder with the CLI:
 
