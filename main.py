@@ -54,7 +54,7 @@ DEFAULT_CALL_TEXT = "Ping. Your endpoint was hit."
 app = FastAPI(
     title="ping_me",
     description="Hit the endpoint, get a Telegram ping on your phone.",
-    version="1.1.1",
+    version="1.1.2",
 )
 
 
@@ -109,18 +109,20 @@ def place_call(text: str) -> dict:
     if not CALLMEBOT_USER:
         return {"requested": False, "error": "CALLMEBOT_USER is not set on the server."}
 
-    params = {
-        "user": CALLMEBOT_USER,
-        "text": text,
-        "rpt": 2,
-        "cc": "no",  # the bot message is already the text copy
-    }
+    # The query string is built by hand because CallMeBot rejects a phone number
+    # whose plus sign is percent-encoded ("%2B..." -> "wrong format"); it must be
+    # a literal "+". cc=no: the bot message is already the text copy.
+    url = (
+        f"{CALLMEBOT_URL}?user={quote(CALLMEBOT_USER, safe='+@')}"
+        f"&text={quote(text, safe='')}&rpt=2&cc=no"
+    )
     page = b""
     try:
-        # Refusals (unknown user, not authorized) come back as a complete page
-        # within a few seconds. A real call may keep the connection open while
-        # the phone rings, so wait a bounded time and then hang up.
-        with requests.get(CALLMEBOT_URL, params=params, stream=True, timeout=(4, 6)) as resp:
+        # Refusals (unknown user, not authorized) come back as a complete page,
+        # after up to about 10 seconds for a phone number. A real call may keep
+        # the connection open while the phone rings, so wait a bounded time and
+        # then hang up.
+        with requests.get(url, stream=True, timeout=(4, 12)) as resp:
             if resp.status_code >= 400:
                 return {
                     "requested": False,
@@ -136,7 +138,7 @@ def place_call(text: str) -> dict:
             except requests.RequestException:
                 pass  # it stopped answering mid-reply; judge by what arrived
     except requests.ReadTimeout:
-        return {"requested": True, "reply": "No refusal from CallMeBot after 6 seconds, so the call should be on its way."}
+        return {"requested": True, "reply": "No refusal from CallMeBot after 12 seconds, so the call should be on its way."}
     except requests.RequestException:
         return {"requested": False, "error": "Could not reach CallMeBot."}
 
