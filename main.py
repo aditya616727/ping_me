@@ -16,6 +16,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote, unquote
 
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -30,8 +31,9 @@ except ImportError:
 
 
 def _normalize_call_user(raw: str) -> str:
-    """Turn '+91 98765-43210', '919876543210', 'name' or '@name' into what CallMeBot expects."""
-    raw = raw.strip()
+    """Turn '+91 98765-43210', '919876543210', '%2B919876543210', 'name' or '@name'
+    into what CallMeBot expects."""
+    raw = unquote(raw).strip()  # tolerate a value pasted in URL-encoded form
     if not raw or raw.startswith("@"):
         return raw
     if re.fullmatch(r"[+\d\s().-]+", raw):
@@ -52,7 +54,7 @@ DEFAULT_CALL_TEXT = "Ping. Your endpoint was hit."
 app = FastAPI(
     title="ping_me",
     description="Hit the endpoint, get a Telegram ping on your phone.",
-    version="1.1.0",
+    version="1.1.1",
 )
 
 
@@ -87,6 +89,15 @@ def _visible_text(page: bytes) -> str:
     text = re.sub(r"<[^>]*>", " ", text)
     text = re.sub(r"<[^>]*$", " ", text)  # tag cut off by a partial read
     return " ".join(html.unescape(text).split())
+
+
+def _hide_user(text: str) -> str:
+    """Keep the configured phone number or username out of API responses."""
+    core = CALLMEBOT_USER.lstrip("+@")
+    for needle in (CALLMEBOT_USER, quote(CALLMEBOT_USER, safe=""), core):
+        if len(needle) >= 5:
+            text = re.sub(re.escape(needle), "[hidden]", text, flags=re.IGNORECASE)
+    return text
 
 
 def place_call(text: str) -> dict:
@@ -129,7 +140,7 @@ def place_call(text: str) -> dict:
     except requests.RequestException:
         return {"requested": False, "error": "Could not reach CallMeBot."}
 
-    reply = _visible_text(page)[:300]
+    reply = _hide_user(_visible_text(page))[:300]
     low = reply.lower()
     if "not authorized" in low:
         return {
@@ -147,6 +158,7 @@ def health():
     return {
         "status": "ok",
         "service": "ping_me",
+        "version": app.version,
         "configured": bool(BOT_TOKEN and CHAT_ID),
         "secret_required": bool(PING_SECRET),
         "call_configured": bool(CALLMEBOT_USER),
