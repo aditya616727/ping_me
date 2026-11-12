@@ -145,12 +145,44 @@ GET /ping?key=SECRET&msg=Backup%20finished
 
 With no `msg`, the default includes the time and the caller's IP address.
 
+## Ring your phone too (optional)
+
+A Telegram bot can only send messages; it cannot place calls. To make `/ping` also
+ring your phone, this API can ask [CallMeBot](https://www.callmebot.com/telegram-call-api/),
+a third-party service, to place a Telegram voice call that reads the message aloud.
+
+1. In Telegram, search for **@CallMeBot_txtbot** and press **Start** to authorize it.
+2. In Telegram **Settings -> Privacy and Security -> Calls**, allow calls from everybody.
+3. Set `CALLMEBOT_USER` to your Telegram phone number with country code (for example
+   `+14155550123`) or your `@username`. Put it in `.env`, or in your host's environment
+   variables, then restart or redeploy.
+4. Add `call=1` to the URL:
+
+```
+GET /ping?key=SECRET&call=1
+GET /ping?key=SECRET&call=1&msg=Server%20is%20down
+```
+
+The Telegram message is always sent first. The response then has a `call` field that
+says whether the call was requested and what CallMeBot replied. `GET /` reports
+`call_configured` so you can check the variable reached the server.
+
+Things to know:
+
+- Your number and the spoken text pass through CallMeBot, and the call comes from
+  their account.
+- On the free shared service, calls last about 30 seconds, the text is cut at 256
+  characters, and calls can be delayed.
+- Requests sent in quick succession can be refused; the `call` field then reports
+  `HTTP 503`.
+- On iPhone the call rings but may not play the spoken text (a Telegram bug).
+
 ## Endpoints
 
 | Method & path | What it does |
 | --- | --- |
 | `GET /`      | Health check — is the service up and configured? |
-| `GET /ping`  | Sends the Telegram ping. **This is the URL you expose.** |
+| `GET /ping`  | Sends the Telegram ping. **This is the URL you expose.** Add `call=1` to ring the phone too. |
 | `GET /docs`  | Interactive API docs (Swagger UI). |
 
 ## Files
