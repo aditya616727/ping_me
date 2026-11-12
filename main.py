@@ -54,7 +54,7 @@ DEFAULT_CALL_TEXT = "Ping. Your endpoint was hit."
 app = FastAPI(
     title="ping_me",
     description="Hit the endpoint, get a Telegram ping on your phone.",
-    version="1.1.2",
+    version="1.1.3",
 )
 
 
@@ -97,7 +97,8 @@ def _hide_user(text: str) -> str:
     for needle in (CALLMEBOT_USER, quote(CALLMEBOT_USER, safe=""), core):
         if len(needle) >= 5:
             text = re.sub(re.escape(needle), "[hidden]", text, flags=re.IGNORECASE)
-    return text
+    # Also covers a number cut off by a partial read, and Telegram user IDs.
+    return re.sub(r"\+?\d{7,}", "[hidden]", text)
 
 
 def place_call(text: str) -> dict:
@@ -142,16 +143,17 @@ def place_call(text: str) -> dict:
     except requests.RequestException:
         return {"requested": False, "error": "Could not reach CallMeBot."}
 
-    reply = _hide_user(_visible_text(page))[:300]
-    low = reply.lower()
-    if "not authorized" in low:
-        return {
-            "requested": False,
-            "error": reply + " To authorize: in Telegram, send /start to @CallMeBot_txtbot.",
-        }
-    if low.startswith("error") or "error:" in low or "calls disabled" in low:
-        return {"requested": False, "error": reply}
-    return {"requested": True, "reply": reply or "CallMeBot accepted the request."}
+    seen = _hide_user(_visible_text(page))
+    low = seen.lower()
+    # CallMeBot puts its explanation of a failure after "Error:" or "Warning!",
+    # behind a long progress log, so report from there rather than from the top.
+    starts = [at for at in (low.find("error:"), low.find("warning!")) if at != -1]
+    if starts or "not authorized" in low or "calls disabled" in low:
+        problem = seen[min(starts):][:300] if starts else seen[:300]
+        if "not authorized" in low:
+            problem += " To authorize: in Telegram, send /start to @CallMeBot_txtbot."
+        return {"requested": False, "error": problem}
+    return {"requested": True, "reply": seen[-300:] or "CallMeBot accepted the request."}
 
 
 @app.get("/")

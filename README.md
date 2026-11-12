@@ -175,6 +175,10 @@ Things to know:
   characters, and calls can be delayed.
 - Requests sent in quick succession can be refused; the `call` field then reports
   `HTTP 503`.
+- If the `call` field says CallMeBot was reported as a spammer, Telegram is limiting
+  the account it calls from. Its reply names that account (for example
+  `@CallMeBot_API16`); add it to your Telegram contacts and send it a message, then
+  try again.
 - On iPhone the call rings but may not play the spoken text (a Telegram bug).
 
 ## Endpoints
