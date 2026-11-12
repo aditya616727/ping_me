@@ -145,6 +145,29 @@ GET /ping?key=SECRET&msg=Backup%20finished
 
 With no `msg`, the default includes the time and the caller's IP address.
 
+## Alarm-style alert (optional, free)
+
+For an alert that is hard to miss, the API can also publish each ping as an urgent
+notification through [ntfy](https://ntfy.sh), a free push service with apps for
+Android and iPhone. It is not a voice call: the phone plays the notification sound,
+vibrates and shows a pop-over.
+
+1. Install the **ntfy** app on your phone.
+2. Pick a topic name that nobody could guess (letters, digits, `-` and `_`). Topics
+   on ntfy.sh are public: anyone who knows the name can read and send your alerts,
+   so treat it like a password.
+3. In the app, subscribe to that topic.
+4. Set `NTFY_TOPIC` to the topic name, in `.env` or in your host's environment
+   variables, then restart or redeploy.
+
+From then on every `/ping` also sends the alert, and the response has an `alarm`
+field. Add `alarm=0` to a URL to skip the alert for that request. `GET /` reports
+`alarm_configured`. If Telegram cannot be reached, the alert is still sent.
+
+On Android, each priority has its own notification channel. In the app's channel
+settings for the highest priority you can pick a long sound and let it override
+Do Not Disturb.
+
 ## Ring your phone too (optional)
 
 A Telegram bot can only send messages; it cannot place calls. To make `/ping` also
@@ -186,7 +209,7 @@ Things to know:
 | Method & path | What it does |
 | --- | --- |
 | `GET /`      | Health check — is the service up and configured? |
-| `GET /ping`  | Sends the Telegram ping. **This is the URL you expose.** Add `call=1` to ring the phone too. |
+| `GET /ping`  | Sends the Telegram ping. **This is the URL you expose.** Also sends the ntfy alert once `NTFY_TOPIC` is set. Add `call=1` to ring the phone too. |
 | `GET /docs`  | Interactive API docs (Swagger UI). |
 
 ## Files

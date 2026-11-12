@@ -8,6 +8,8 @@ Optional query params on /ping:
   ?key=SECRET        -> required only when PING_SECRET is set (keeps strangers out)
   ?call=1            -> also ring your phone with a Telegram voice call
                         (needs CALLMEBOT_USER, see README)
+  ?alarm=0           -> skip the urgent ntfy alert, which is otherwise sent
+                        with every ping once NTFY_TOPIC is set (see README)
 """
 
 import html
@@ -42,19 +44,26 @@ def _normalize_call_user(raw: str) -> str:
     return "@" + raw
 
 
+def _normalize_topic(raw: str) -> str:
+    """Accept 'mytopic', 'ntfy.sh/mytopic' or 'https://ntfy.sh/mytopic'."""
+    return unquote(raw).strip().rstrip("/").rsplit("/", 1)[-1]
+
+
 BOT_TOKEN = "".join(os.getenv("TELEGRAM_BOT_TOKEN", "").split())
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 PING_SECRET = os.getenv("PING_SECRET", "").strip()  # optional
 CALLMEBOT_USER = _normalize_call_user(os.getenv("CALLMEBOT_USER", ""))  # optional
+NTFY_TOPIC = _normalize_topic(os.getenv("NTFY_TOPIC", ""))  # optional
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 CALLMEBOT_URL = "https://api.callmebot.com/start.php"
+NTFY_URL = "https://ntfy.sh/"
 DEFAULT_CALL_TEXT = "Ping. Your endpoint was hit."
 
 app = FastAPI(
     title="ping_me",
     description="Hit the endpoint, get a Telegram ping on your phone.",
-    version="1.1.3",
+    version="1.2.0",
 )
 
 
@@ -78,6 +87,32 @@ def send_telegram(text: str) -> None:
         ) from None
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"Telegram API error: {resp.text}")
+
+
+def send_alarm(text: str) -> dict:
+    """Publish `text` as an urgent notification to the ntfy topic NTFY_TOPIC.
+
+    Never raises, so a failed alert is reported in the response instead of
+    failing the ping.
+    """
+    if not NTFY_TOPIC:
+        return {"sent": False, "error": "NTFY_TOPIC is not set on the server."}
+    if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", NTFY_TOPIC):
+        return {
+            "sent": False,
+            "error": "NTFY_TOPIC is not a valid ntfy topic name (letters, digits, - and _ only).",
+        }
+    try:
+        resp = requests.post(
+            NTFY_URL,
+            json={"topic": NTFY_TOPIC, "title": "Ping", "message": text, "priority": 5, "tags": ["bell"]},
+            timeout=(4, 6),
+        )
+    except requests.RequestException:
+        return {"sent": False, "error": "Could not reach ntfy."}
+    if resp.status_code != 200:
+        return {"sent": False, "error": f"ntfy returned HTTP {resp.status_code}."}
+    return {"sent": True}
 
 
 def _visible_text(page: bytes) -> str:
@@ -166,6 +201,7 @@ def health():
         "configured": bool(BOT_TOKEN and CHAT_ID),
         "secret_required": bool(PING_SECRET),
         "call_configured": bool(CALLMEBOT_USER),
+        "alarm_configured": bool(NTFY_TOPIC),
     }
 
 
@@ -175,6 +211,10 @@ def ping(
     msg: Optional[str] = Query(default=None, description="Custom message text."),
     key: str = Query(default="", description="Secret key, required if PING_SECRET is set."),
     call: bool = Query(default=False, description="Also ring the phone with a Telegram voice call."),
+    alarm: Optional[bool] = Query(
+        default=None,
+        description="Urgent alert through ntfy. Sent by default once NTFY_TOPIC is set; alarm=0 skips it.",
+    ),
 ):
     """Trigger a Telegram ping. This is the URL you expose to the internet."""
     if PING_SECRET and key != PING_SECRET:
@@ -192,9 +232,17 @@ def ping(
         client_ip = "unknown"
 
     text = msg or f"\U0001F514 Ping!\nYour endpoint was hit.\n\U0001F552 {now}\n\U0001F310 from {client_ip}"
-    send_telegram(text)
+    want_alarm = alarm if alarm is not None else bool(NTFY_TOPIC)
+    try:
+        send_telegram(text)
+    except HTTPException:
+        if want_alarm:
+            send_alarm(text)  # Telegram failed, so the second channel matters most now
+        raise
 
     result = {"ok": True, "sent": text}
+    if want_alarm:
+        result["alarm"] = send_alarm(text)
     if call:
         # Spoken text: no emoji or line breaks, and CallMeBot cuts it at 256 characters.
         result["call"] = place_call(" ".join((msg or DEFAULT_CALL_TEXT).split())[:256])
