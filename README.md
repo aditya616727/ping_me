@@ -204,6 +204,47 @@ Things to know:
   try again.
 - On iPhone the call rings but may not play the spoken text (a Telegram bug).
 
+## Email with document attachments
+
+Set these environment variables in `.env` or your hosting provider, then restart
+or redeploy the app. Install the updated dependencies with `pip install -r requirements.txt`.
+
+```dotenv
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USERNAME=you@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=you@gmail.com
+```
+
+Use your mail provider's SMTP host and credentials. `SMTP_SECURITY` accepts
+`starttls` (typically port 587) or `ssl` (typically port 465). For Gmail, use an
+app password. `SMTP_FROM` defaults to `SMTP_USERNAME` when omitted. Providers
+may require the sender address to be verified. Relays that accept unauthenticated
+TLS connections can leave both username and password empty.
+
+Send a multipart request to `POST /email`. The `to` and `subject` fields are
+required. `body` and `attachments` are optional. Repeat `attachments` to upload
+multiple documents, with a combined limit of 10 MiB.
+
+```bash
+curl -X POST "http://localhost:8000/email?key=YOUR_PING_SECRET" \
+  --form-string "to=recipient@example.com" \
+  --form-string "subject=Your document" \
+  --form-string "body=Please find the document attached." \
+  -F "attachments=@./document.docx"
+```
+
+On Windows PowerShell, use `curl.exe` and enter the command on one line.
+Omit `?key=...` when `PING_SECRET` is empty. Setting `PING_SECRET` protects both
+`/ping` and `/email`. You can also send requests using the form at `/docs`.
+
+A successful response means the SMTP server accepted the email for delivery.
+`GET /` includes `email_configured` to report whether the SMTP host and sender
+are set. Hosting providers and mail providers may impose additional upload
+limits or SMTP connection restrictions.
+
 ## Endpoints
 
 | Method & path | What it does |
@@ -211,6 +252,7 @@ Things to know:
 | `GET /`      | Health check — is the service up and configured? |
 | `GET /ping`  | Sends the Telegram ping. **This is the URL you expose.** Also sends the ntfy alert once `NTFY_TOPIC` is set. Add `call=1` to ring the phone too. |
 | `GET /docs`  | Interactive API docs (Swagger UI). |
+| `POST /email` | Sends an email through SMTP with optional document attachments. Uses `PING_SECRET` when set. |
 
 ## Files
 

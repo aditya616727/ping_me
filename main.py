@@ -13,15 +13,20 @@ Optional query params on /ping:
 """
 
 import html
+import mimetypes
 import os
 import re
+import smtplib
+import ssl
 import time
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from typing import Optional
 from urllib.parse import quote, unquote
 
 import requests
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 # Load variables from a local .env file, if python-dotenv is installed.
 try:
@@ -54,6 +59,13 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 PING_SECRET = os.getenv("PING_SECRET", "").strip()  # optional
 CALLMEBOT_USER = _normalize_call_user(os.getenv("CALLMEBOT_USER", ""))  # optional
 NTFY_TOPIC = _normalize_topic(os.getenv("NTFY_TOPIC", ""))  # optional
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = os.getenv("SMTP_PORT", "587").strip()
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip() or SMTP_USERNAME
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls").strip().lower()
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 CALLMEBOT_URL = "https://api.callmebot.com/start.php"
@@ -62,9 +74,92 @@ DEFAULT_CALL_TEXT = "Ping. Your endpoint was hit."
 
 app = FastAPI(
     title="ping_me",
-    description="Hit the endpoint, get a Telegram ping on your phone.",
-    version="1.2.0",
+    description="Send Telegram pings and email with document attachments over SMTP.",
+    version="1.3.0",
 )
+
+
+def send_email(message: EmailMessage) -> None:
+    """Submit a message to the configured SMTP server over TLS."""
+    if not SMTP_HOST or not SMTP_FROM:
+        raise HTTPException(
+            status_code=500,
+            detail="Server not configured: set SMTP_HOST and SMTP_FROM (or SMTP_USERNAME).",
+        )
+    try:
+        port = int(SMTP_PORT)
+        if not 1 <= port <= 65535 or SMTP_SECURITY not in {"starttls", "ssl"}:
+            raise ValueError
+        sender = str(TypeAdapter(EmailStr).validate_python(SMTP_FROM))
+    except (ValueError, ValidationError):
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid SMTP configuration: check SMTP_PORT, SMTP_FROM and SMTP_SECURITY (starttls or ssl).",
+        ) from None
+    if bool(SMTP_USERNAME) != bool(SMTP_PASSWORD):
+        raise HTTPException(
+            status_code=500,
+            detail="Set both SMTP_USERNAME and SMTP_PASSWORD for SMTP authentication.",
+        )
+
+    message["From"] = sender
+    context = ssl.create_default_context()
+    try:
+        if SMTP_SECURITY == "ssl":
+            client = smtplib.SMTP_SSL(SMTP_HOST, port, timeout=15, context=context)
+        else:
+            client = smtplib.SMTP(SMTP_HOST, port, timeout=15)
+        with client:
+            if SMTP_SECURITY == "starttls":
+                client.starttls(context=context)
+            if SMTP_USERNAME:
+                client.login(SMTP_USERNAME, SMTP_PASSWORD)
+            client.send_message(message)
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=502, detail="SMTP authentication failed. Check the server credentials.") from None
+    except smtplib.SMTPRecipientsRefused:
+        raise HTTPException(status_code=502, detail="The SMTP server rejected the recipient.") from None
+    except (smtplib.SMTPException, OSError):
+        raise HTTPException(status_code=502, detail="Could not send email through the SMTP server.") from None
+
+
+@app.post("/email")
+def email(
+    to: EmailStr = Form(description="Recipient email address."),
+    subject: str = Form(min_length=1, max_length=998),
+    body: str = Form(default="", max_length=100000),
+    attachments: Optional[list[UploadFile]] = File(
+        default=None, description="Optional document uploads, up to 10 MiB combined."
+    ),
+    key: str = Query(default="", description="Secret key, required if PING_SECRET is set."),
+):
+    """Send an email, optionally with one or more document attachments."""
+    if PING_SECRET and key != PING_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid or missing key.")
+    if "\r" in subject or "\n" in subject:
+        raise HTTPException(status_code=422, detail="Subject must be a single line.")
+
+    message = EmailMessage()
+    message["To"] = str(to)
+    message["Subject"] = subject
+    message.set_content(body)
+    filenames = []
+    total_bytes = 0
+    for attachment in attachments or []:
+        filename = (attachment.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        if not filename or any(ord(char) < 32 or ord(char) == 127 for char in filename):
+            raise HTTPException(status_code=422, detail="Each attachment needs a valid filename.")
+        data = attachment.file.read(MAX_ATTACHMENT_BYTES - total_bytes + 1)
+        total_bytes += len(data)
+        if total_bytes > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(status_code=413, detail="Attachments exceed the combined 10 MiB limit.")
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        maintype, subtype = content_type.split("/", 1)
+        message.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+        filenames.append(filename)
+
+    send_email(message)
+    return {"ok": True, "to": str(to), "subject": subject, "attachments": filenames}
 
 
 def send_telegram(text: str) -> None:
@@ -202,6 +297,7 @@ def health():
         "secret_required": bool(PING_SECRET),
         "call_configured": bool(CALLMEBOT_USER),
         "alarm_configured": bool(NTFY_TOPIC),
+        "email_configured": bool(SMTP_HOST and SMTP_FROM),
     }
 
 
